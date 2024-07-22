@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mirror with Alpine.js</title>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        body {
+            background-color: #eeede9;
+        }
+
+        #apple-mirror {
+            position: relative;
+            margin: 0 auto;
+            margin-top: 60px;
+            overflow: hidden;
+        }
+
+        #apple-mirror canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="apple-mirror" x-data="appleMirror()" x-init="init()" :style="containerStyle">
+        <svg width="0" height="0">
+            <defs>
+                <clipPath id="appleMask" :transform="svgTransform">
+                    <path :d="svgPath" />
+                </clipPath>
+            </defs>
+        </svg>
+        <video x-ref="video" autoplay playsinline style="display: none;"></video>
+        <canvas x-ref="canvas" :width="canvasWidth" :height="canvasHeight" style="clip-path: url(#appleMask);"></canvas>
+        <div x-show="isLoading">Loading apple shape...</div>
+        <div x-show="error" x-text="error"></div>
+    </div>
+
+    <script>
+        function appleMirror () {
+            return {
+                svgPath: '',
+                svgSize: { width: 0, height: 0 },
+                svgViewBox: { minX: 0, minY: 0, width: 0, height: 0 },
+                isLoading: true,
+                error: null,
+                canvasWidth: 320,
+                canvasHeight: 320,
+                containerStyle: { width: 320, height: 320 },
+                svgTransform: '',
+
+                async init () {
+                    await this.loadSvgPath();
+                    if (!this.error) {
+                        this.setupCamera();
+                    }
+                },
+
+                async loadSvgPath () {
+                    try {
+                        const response = await fetch('./apple.svg');
+                        if (!response.ok) {
+                            throw new Error('Failed to load SVG');
+                        }
+                        const svgContent = await response.text();
+                        const parser = new DOMParser();
+                        const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml');
+                        const svgElement = svgDoc.documentElement;
+
+                        // Extract viewBox
+                        const viewBox = svgElement.getAttribute('viewBox');
+                        if (viewBox) {
+                            const [minX, minY, width, height] = viewBox.split(' ').map(Number);
+                            this.svgViewBox = { minX, minY, width, height };
+                            this.svgSize = { width, height };
+                        } else {
+                            this.svgSize.width = parseFloat(svgElement.getAttribute('width') || '0');
+                            this.svgSize.height = parseFloat(svgElement.getAttribute('height') || '0');
+                            this.svgViewBox = { minX: 0, minY: 0, width: this.svgSize.width, height: this.svgSize.height };
+                        }
+
+                        // Extract path
+                        const pathElement = svgElement.querySelector('path');
+                        if (pathElement) {
+                            this.svgPath = pathElement.getAttribute('d') || '';
+                        } else {
+                            throw new Error('Failed to extract path from SVG');
+                        }
+
+                        this.updateContainerStyle();
+
+                        this.isLoading = false;
+                    } catch (err) {
+                        console.error("Error loading SVG:", err);
+                        this.error = 'Failed to load apple shape. Please try again.';
+                        this.isLoading = false;
+                    }
+                },
+
+                updateContainerStyle () {
+                    if (this.svgSize.width && this.svgSize.height) {
+                        const maxSize = 300;
+                        const scale = Math.min(maxSize / this.svgSize.width, maxSize / this.svgSize.height);
+                        this.canvasWidth = Math.ceil(this.svgSize.width * scale) * 0.85;
+                        this.canvasHeight = Math.ceil(this.svgSize.height * scale) * 1.1;
+
+                        this.containerStyle = {
+                            width: `${this.canvasWidth}px`,
+                            height: `${this.canvasHeight}px`,
+                        };
+
+                        // Center the SVG path within the clip-path
+                        const translateX = (this.canvasWidth / 2) - (this.svgViewBox.width / 2) - this.svgViewBox.minX;
+                        const translateY = (this.canvasHeight / 2) - (this.svgViewBox.height / 2) - this.svgViewBox.minY;
+                        this.svgTransform = `scale(0.5)`;
+                    }
+                },
+
+                async setupCamera () {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                        this.$refs.video.srcObject = stream;
+                        this.$refs.video.onloadedmetadata = () => {
+                            this.drawVideoToCanvas();
+                        };
+                    } catch (err) {
+                        console.error("Error accessing the camera:", err);
+                        this.error = 'Failed to access camera. Please check your permissions.';
+                    }
+                },
+
+                drawVideoToCanvas () {
+                    const video = this.$refs.video;
+                    const canvas = this.$refs.canvas;
+                    const ctx = canvas.getContext('2d');
+
+                    const drawFrame = () => {
+                        if (video.paused || video.ended) return;
+
+                        const videoAspect = video.videoWidth / video.videoHeight;
+                        const canvasAspect = canvas.width / canvas.height;
+                        let sx, sy, sWidth, sHeight;
+
+                        if (videoAspect > canvasAspect) {
+                            sHeight = video.videoHeight;
+                            sWidth = sHeight * canvasAspect;
+                            sx = (video.videoWidth - sWidth) / 2;
+                            sy = 0;
+                        } else {
+                            sWidth = video.videoWidth;
+                            sHeight = sWidth / canvasAspect;
+                            sx = 0;
+                            sy = (video.videoHeight - sHeight) / 2;
+                        }
+
+                        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+                        requestAnimationFrame(drawFrame);
+                    };
+
+                    drawFrame();
+                }
+            };
+        }
+    </script>
+</body>
+
+</html>
