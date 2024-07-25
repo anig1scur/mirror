@@ -9,161 +9,219 @@
     <style>
         body {
             background-color: #eeede9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
         }
 
-        #apple-mirror {
+        .container {
             position: relative;
-            margin: 0 auto;
-            margin-top: 60px;
+            width: 500px;
+            height: 500px;
+        }
+
+        .button-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transition: transform 0.1s ease;
+        }
+
+        .button-container.pressed {
+            transform: scale(0.98);
+        }
+
+        .details-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
         }
 
-        #apple-mirror canvas {
+        .cursor {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            background-color: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .fingerprint {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .button {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .button-reflection {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .shadow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .surface-reflection {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.1;
+            filter: blur(10px) saturate(0.5);
+            transform: scale(1.1);
+        }
+
+        .apple-shape {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            clip-path: url(#apple-clip);
         }
     </style>
 </head>
 
 <body>
-    <div id="apple-mirror" x-data="appleMirror()" x-init="init()" :style="containerStyle">
+    <div class="container" x-data="shinyAppleMirror()" x-init="init()">
+        <div class="button-container" :class="{ 'pressed': buttonPressed }" @mouseenter="setButtonFocus(true)"
+            @mouseleave="setButtonFocus(false)" @mousedown="handleMouseDown" @mouseup="setButtonPressed(false)"
+            @touchstart="handleMouseDown" @touchend="setButtonPressed(false)">
+            <div class="details-container" x-ref="detailsContainer">
+                <div class="cursor" :style="cursorStyle"></div>
+                <template x-for="(fingerprint, index) in fingerprints" :key="index">
+                    <div class="fingerprint" :style="getFingerPrintStyle(fingerprint)"></div>
+                </template>
+            </div>
+            <div class="apple-shape">
+                <video class="surface-reflection" x-ref="surfaceReflection" playsinline></video>
+                <div class="button">
+                    <video class="button-reflection" x-ref="reflection" playsinline :style="reflectionStyle"></video>
+                    <div class="shadow"></div>
+                </div>
+            </div>
+        </div>
+
         <svg width="0" height="0">
             <defs>
-                <clipPath id="appleMask" :transform="svgTransform">
-                    <path :d="svgPath" />
+                <clipPath id="apple-clip">
+                    <path transform="scale(0.75)"
+                        d="M273.81 52.973C313.806.257 369.41 0 369.41 0s8.271 49.562-31.463 97.306c-42.426 50.98-90.649 42.638-90.649 42.638s-9.055-40.094 26.512-86.971zM252.385 174.662c20.576 0 58.764-28.284 108.471-28.284 85.562 0 119.222 60.883 119.222 60.883s-65.833 33.659-65.833 115.331c0 92.133 82.01 123.885 82.01 123.885s-57.328 161.357-134.762 161.357c-35.565 0-63.215-23.967-100.688-23.967-38.188 0-76.084 24.861-100.766 24.861C89.33 608.73 0 455.666 0 332.628c0-121.052 75.612-184.554 146.533-184.554 46.105 0 81.883 26.588 105.852 26.588z" />
                 </clipPath>
             </defs>
         </svg>
-        <video x-ref="video" autoplay playsinline style="display: none;"></video>
-        <canvas x-ref="canvas" :width="canvasWidth" :height="canvasHeight" style="clip-path: url(#appleMask);"></canvas>
-        <div x-show="isLoading">Loading apple shape...</div>
-        <div x-show="error" x-text="error"></div>
     </div>
 
     <script>
-        function appleMirror () {
+        function shinyAppleMirror () {
             return {
-                svgPath: '',
-                svgSize: { width: 0, height: 0 },
-                svgViewBox: { minX: 0, minY: 0, width: 0, height: 0 },
-                isLoading: true,
-                error: null,
-                canvasWidth: 320,
-                canvasHeight: 320,
-                containerStyle: { width: 320, height: 320 },
-                svgTransform: '',
+                buttonFocus: false,
+                buttonPressed: false,
+                cursorPosition: { x: 0, y: 0 },
+                fingerprints: [],
+                roughness: 0.2,
+                cameraWidth: 500,
+                cameraHeight: 500,
+                cameraFacingMode: 'user',
 
-                async init () {
-                    await this.loadSvgPath();
-                    if (!this.error) {
-                        this.setupCamera();
-                    }
+                init () {
+                    this.setupCamera();
+                    this.trackCursor();
                 },
 
-                async loadSvgPath () {
-                    try {
-                        const response = await fetch('./apple.svg');
-                        if (!response.ok) {
-                            throw new Error('Failed to load SVG');
-                        }
-                        const svgContent = await response.text();
-                        const parser = new DOMParser();
-                        const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml');
-                        const svgElement = svgDoc.documentElement;
-
-                        // Extract viewBox
-                        const viewBox = svgElement.getAttribute('viewBox');
-                        if (viewBox) {
-                            const [minX, minY, width, height] = viewBox.split(' ').map(Number);
-                            this.svgViewBox = { minX, minY, width, height };
-                            this.svgSize = { width, height };
-                        } else {
-                            this.svgSize.width = parseFloat(svgElement.getAttribute('width') || '0');
-                            this.svgSize.height = parseFloat(svgElement.getAttribute('height') || '0');
-                            this.svgViewBox = { minX: 0, minY: 0, width: this.svgSize.width, height: this.svgSize.height };
-                        }
-
-                        // Extract path
-                        const pathElement = svgElement.querySelector('path');
-                        if (pathElement) {
-                            this.svgPath = pathElement.getAttribute('d') || '';
-                        } else {
-                            throw new Error('Failed to extract path from SVG');
-                        }
-
-                        this.updateContainerStyle();
-
-                        this.isLoading = false;
-                    } catch (err) {
-                        console.error("Error loading SVG:", err);
-                        this.error = 'Failed to load apple shape. Please try again.';
-                        this.isLoading = false;
-                    }
-                },
-
-                updateContainerStyle () {
-                    if (this.svgSize.width && this.svgSize.height) {
-                        const maxSize = 300;
-                        const scale = Math.min(maxSize / this.svgSize.width, maxSize / this.svgSize.height);
-                        this.canvasWidth = Math.ceil(this.svgSize.width * scale) * 0.85;
-                        this.canvasHeight = Math.ceil(this.svgSize.height * scale) * 1.1;
-
-                        this.containerStyle = {
-                            width: `${this.canvasWidth}px`,
-                            height: `${this.canvasHeight}px`,
-                        };
-
-                        // Center the SVG path within the clip-path
-                        const translateX = (this.canvasWidth / 2) - (this.svgViewBox.width / 2) - this.svgViewBox.minX;
-                        const translateY = (this.canvasHeight / 2) - (this.svgViewBox.height / 2) - this.svgViewBox.minY;
-                        this.svgTransform = `scale(0.5)`;
-                    }
-                },
-
-                async setupCamera () {
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-                        this.$refs.video.srcObject = stream;
-                        this.$refs.video.onloadedmetadata = () => {
-                            this.drawVideoToCanvas();
-                        };
-                    } catch (err) {
-                        console.error("Error accessing the camera:", err);
-                        this.error = 'Failed to access camera. Please check your permissions.';
-                    }
-                },
-
-                drawVideoToCanvas () {
-                    const video = this.$refs.video;
-                    const canvas = this.$refs.canvas;
-                    const ctx = canvas.getContext('2d');
-
-                    const drawFrame = () => {
-                        if (video.paused || video.ended) return;
-
-                        const videoAspect = video.videoWidth / video.videoHeight;
-                        const canvasAspect = canvas.width / canvas.height;
-                        let sx, sy, sWidth, sHeight;
-
-                        if (videoAspect > canvasAspect) {
-                            sHeight = video.videoHeight;
-                            sWidth = sHeight * canvasAspect;
-                            sx = (video.videoWidth - sWidth) / 2;
-                            sy = 0;
-                        } else {
-                            sWidth = video.videoWidth;
-                            sHeight = sWidth / canvasAspect;
-                            sx = 0;
-                            sy = (video.videoHeight - sHeight) / 2;
-                        }
-
-                        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
-                        requestAnimationFrame(drawFrame);
+                setupCamera () {
+                    const constraints = {
+                        video: {
+                            width: { ideal: this.cameraWidth },
+                            height: { ideal: this.cameraHeight },
+                            facingMode: this.cameraFacingMode
+                        },
+                        audio: false
                     };
 
-                    drawFrame();
+                    navigator.mediaDevices.getUserMedia(constraints)
+                        .then(stream => {
+                            this.$refs.reflection.srcObject = stream;
+                            this.$refs.reflection.onloadedmetadata = () => this.$refs.reflection.play();
+
+                            this.$refs.surfaceReflection.srcObject = stream;
+                            this.$refs.surfaceReflection.onloadedmetadata = () => this.$refs.surfaceReflection.play();
+                        })
+                        .catch(e => console.error("Error accessing the camera:", e));
+                },
+
+                trackCursor () {
+                    window.addEventListener('mousemove', (event) => {
+                        const rect = this.$refs.detailsContainer.getBoundingClientRect();
+                        this.cursorPosition = {
+                            x: event.clientX - rect.x,
+                            y: event.clientY - rect.y
+                        };
+                    });
+                },
+
+                setButtonFocus (focus) {
+                    this.buttonFocus = focus;
+                },
+
+                setButtonPressed (pressed) {
+                    this.buttonPressed = pressed;
+                },
+
+                handleMouseDown (event) {
+                    this.setButtonPressed(true);
+                    const rect = this.$refs.detailsContainer.getBoundingClientRect();
+                    const fingerprint = {
+                        x: event.clientX - rect.x,
+                        y: event.clientY - rect.y
+                    };
+                    this.fingerprints.push(fingerprint);
+                },
+
+                getFingerPrintStyle (fingerprint) {
+                    return `transform: translate(${fingerprint.x}px, ${fingerprint.y}px) translate(-50%, -50%);`;
+                },
+
+                get cursorStyle () {
+                    return `
+                        transform: translate(${this.cursorPosition.x}px, ${this.cursorPosition.y}px) translate(-50%, -50%);
+                        opacity: ${this.buttonFocus ? 1 : 0};
+                    `;
+                },
+
+                get reflectionStyle () {
+                    const mappedRoughness = Math.round(this.scale(this.roughness, 0, 1, 0, 16));
+                    return `filter: blur(${mappedRoughness}px) saturate(0.4) brightness(1.1);`;
+                },
+
+                scale (number, inMin, inMax, outMin, outMax) {
+                    return ((number - inMin) * (outMax - outMin)) / (inMax - inMin) + outMin;
                 }
             };
         }
